@@ -13,7 +13,8 @@ import {
 } from '../types';
 
 const API_BASE = ((import.meta as any).env && (import.meta as any).env.VITE_API_BASE_URL) || '/api/v1';
-const API_REQUEST_TIMEOUT_MS = 30_000;
+const API_REQUEST_TIMEOUT_MS = 60_000;
+const DASHBOARD_REQUEST_TIMEOUT_MS = 30_000;
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number) {
@@ -22,10 +23,14 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(
+  endpoint: string,
+  options: RequestInit = {},
+  timeoutMs = API_REQUEST_TIMEOUT_MS,
+): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   const defaultHeaders: Record<string, string> = {
     'Accept': 'application/json',
   };
@@ -68,7 +73,9 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     return await response.json();
   } catch (error: any) {
     if (controller.signal.aborted) {
-      throw new ApiError('The request timed out. Check your connection and try again.', 408);
+      const timeoutError = new ApiError('The request timed out. Check your connection and try again.', 408);
+      console.error(`API request timed out on ${endpoint}`);
+      throw timeoutError;
     }
     if (!(error instanceof ApiError && error.status === 401)) {
       console.error(`API Error on ${endpoint}:`, error);
@@ -84,7 +91,7 @@ export const api = {
   getHealth: () => request<{ status: string; service: string; version: string }>('/health'),
   getConfig: () => request<AppConfig>('/config'),
 
-  getCurrentUser: () => request<AccountUser>('/auth/me'),
+  getCurrentUser: () => request<AccountUser>('/auth/me', {}, DASHBOARD_REQUEST_TIMEOUT_MS),
 
   register: (data: { name: string; email: string; password: string }) =>
     request<AccountUser>('/auth/register', {
@@ -115,7 +122,11 @@ export const api = {
     if (location) params.append('location', location);
     if (district) params.append('district', district);
     if (state) params.append('state', state);
-    return request<DashboardData>(`/dashboard?${params.toString()}`);
+    return request<DashboardData>(
+      `/dashboard?${params.toString()}`,
+      {},
+      DASHBOARD_REQUEST_TIMEOUT_MS,
+    );
   },
 
   // Chat
