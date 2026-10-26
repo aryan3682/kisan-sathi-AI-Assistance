@@ -13,6 +13,7 @@ import {
 } from '../types';
 
 const API_BASE = ((import.meta as any).env && (import.meta as any).env.VITE_API_BASE_URL) || '/api/v1';
+const API_REQUEST_TIMEOUT_MS = 30_000;
 
 export class ApiError extends Error {
   constructor(message: string, public readonly status: number) {
@@ -23,6 +24,8 @@ export class ApiError extends Error {
 
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), API_REQUEST_TIMEOUT_MS);
   const defaultHeaders: Record<string, string> = {
     'Accept': 'application/json',
   };
@@ -34,6 +37,7 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
   const config: RequestInit = {
     ...options,
+    signal: controller.signal,
     credentials: 'include',
     headers: {
       ...defaultHeaders,
@@ -63,10 +67,15 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
     return await response.json();
   } catch (error: any) {
+    if (controller.signal.aborted) {
+      throw new ApiError('The request timed out. Check your connection and try again.', 408);
+    }
     if (!(error instanceof ApiError && error.status === 401)) {
       console.error(`API Error on ${endpoint}:`, error);
     }
     throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
 }
 
